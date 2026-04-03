@@ -1,0 +1,8 @@
+{
+  "backend": "tfidf",
+  "model_name": "tfidf",
+  "device": "cpu",
+  "note": "Auto mode defaults to lightweight tiny-model profile (TF-IDF)",
+  "model_profile": "tiny-1m-style",
+  "approx_parameters": 1000000
+}
