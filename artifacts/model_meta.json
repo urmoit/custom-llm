@@ -1,8 +1,9 @@
 {
-  "backend": "tfidf",
-  "model_name": "tfidf",
-  "device": "cpu",
-  "note": "Auto mode defaults to lightweight tiny-model profile (TF-IDF)",
-  "model_profile": "tiny-1m-style",
-  "approx_parameters": 1000000
+  "backend": "transformer",
+  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "device": "cuda",
+  "note": "GPU transformer embeddings (best quality)",
+  "model_profile": "transformer-embedding",
+  "approx_parameters": 22400000,
+  "corpus_size": 765
 }

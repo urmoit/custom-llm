@@ -54,31 +54,30 @@ def _extract_sections(path: Path) -> Tuple[str, List[Tuple[str, str]]]:
     return topic, sections
 
 
-def _make_chunks(topic: str, sections: List[Tuple[str, str]]) -> List[Dict[str, str]]:
+def _make_chunks(topic: str, sections: List[Tuple[str, str]], source: str = "") -> List[Dict[str, str]]:
     chunks: List[Dict[str, str]] = []
 
     full_summary = "\n\n".join(f"{name}: {text}" for name, text in sections)
-    chunks.append(
-        {
-            "topic": topic,
-            "section": "Full Summary",
-            "text": f"Topic: {topic}\nSection: Full Summary\n{full_summary}",
-        }
-    )
+    chunks.append({
+        "topic": topic,
+        "section": "Full Summary",
+        "text": f"Topic: {topic}\nSection: Full Summary\n{full_summary}",
+        "source": source,
+    })
 
     for section, text in sections:
-        chunks.append(
-            {
-                "topic": topic,
-                "section": section,
-                "text": f"Topic: {topic}\nSection: {section}\n{text}",
-            }
-        )
+        chunks.append({
+            "topic": topic,
+            "section": section,
+            "text": f"Topic: {topic}\nSection: {section}\n{text}",
+            "source": source,
+        })
 
     return chunks
 
 
 def _make_synthetic_examples() -> List[Dict[str, str]]:
+    """Extended synthetic examples covering new knowledge domains."""
     topic_specs = [
         (
             "Conversation Basics",
@@ -90,19 +89,19 @@ def _make_synthetic_examples() -> List[Dict[str, str]]:
                 "the user asks how you are",
                 "the user asks what you can do",
                 "the user wants grammar cleanup",
-                "the user writes with slang like u and thx",
+                "the user writes with slang",
                 "the user has a short typo",
-                "the user wants one short follow-up",
+                "the user wants more detail",
             ],
             [
                 ("Brief greeting", "reply with a short friendly greeting."),
                 ("Clarify", "ask one short clarifying follow-up."),
                 ("Small talk", "answer naturally and stay helpful."),
-                ("Grammar cleanup", "clean up the wording lightly without changing meaning."),
+                ("Grammar cleanup", "clean up the wording lightly."),
             ],
         ),
         (
-            "General Knowledge Basics",
+            "General Knowledge",
             [
                 "weather versus climate",
                 "percent and average",
@@ -134,7 +133,12 @@ def _make_synthetic_examples() -> List[Dict[str, str]]:
                 "modules and packages",
                 "virtual environments",
                 "type hints",
-                "script layout",
+                "decorators",
+                "asyncio and concurrency",
+                "testing with pytest",
+                "dataclasses",
+                "context managers",
+                "performance optimization",
             ],
             [
                 ("Simple explain", "explain the concept simply."),
@@ -144,7 +148,56 @@ def _make_synthetic_examples() -> List[Dict[str, str]]:
             ],
         ),
         (
-            "United States of America (USA)",
+            "Science",
+            [
+                "Newton's laws of motion",
+                "thermodynamics and entropy",
+                "quantum mechanics basics",
+                "relativity and E=mc2",
+                "the periodic table",
+                "chemical bonding",
+                "DNA and genetics",
+                "evolution and natural selection",
+                "the Big Bang",
+                "black holes",
+                "climate change and greenhouse gases",
+                "renewable energy",
+                "cell biology",
+                "the immune system",
+                "calculus basics",
+                "probability and statistics",
+                "linear algebra",
+            ],
+            [
+                ("Simple explain", "explain the concept simply."),
+                ("Key fact", "state one key fact."),
+                ("Real-world application", "give a real-world application."),
+                ("Common misconception", "correct one common misconception."),
+            ],
+        ),
+        (
+            "World History",
+            [
+                "ancient civilizations",
+                "the Roman Empire",
+                "the Industrial Revolution",
+                "World War I causes",
+                "World War II and the Holocaust",
+                "the Cold War",
+                "the French Revolution",
+                "decolonization",
+                "the moon landing",
+                "the internet era",
+            ],
+            [
+                ("Brief summary", "summarize briefly."),
+                ("Key cause or effect", "state one key cause or effect."),
+                ("Historical significance", "explain its significance."),
+                ("Timeline fact", "give one specific date or timeline fact."),
+            ],
+        ),
+        (
+            "United States of America",
             [
                 "the capital and currency",
                 "states, districts, and territories",
@@ -156,12 +209,119 @@ def _make_synthetic_examples() -> List[Dict[str, str]]:
                 "technology and innovation",
                 "the space program",
                 "culture and society",
+                "ongoing policy challenges",
+                "military and foreign policy",
             ],
             [
                 ("Brief fact", "state the fact briefly."),
                 ("Broader context", "add one broader context point."),
                 ("Regional variation", "mention one regional variation."),
                 ("Practical implication", "mention one practical implication."),
+            ],
+        ),
+        (
+            "Countries of the World",
+            [
+                "China's government and economy",
+                "India's democracy and culture",
+                "UK's parliament and history",
+                "Germany's economy and history",
+                "Japan's culture and economy",
+                "Estonia's digital government",
+                "Brazil's geography and culture",
+                "Russia's geography and politics",
+                "France's culture and history",
+                "Canada's government and geography",
+            ],
+            [
+                ("Identity fact", "state a key identity fact."),
+                ("Economic fact", "state a key economic fact."),
+                ("Cultural fact", "state a key cultural fact."),
+                ("Historical fact", "state a key historical fact."),
+            ],
+        ),
+        (
+            "Health and Medicine",
+            [
+                "nutrition and macronutrients",
+                "exercise and fitness benefits",
+                "heart disease risk factors",
+                "diabetes prevention",
+                "mental health and depression",
+                "vaccines and immunity",
+                "antibiotics and resistance",
+                "cancer basics",
+                "sleep and health",
+                "public health and epidemiology",
+            ],
+            [
+                ("Simple explain", "explain simply."),
+                ("Key fact", "state one key fact."),
+                ("Practical advice", "give one practical health tip."),
+                ("Common misconception", "correct one common misconception."),
+            ],
+        ),
+        (
+            "Philosophy",
+            [
+                "consequentialism and utilitarianism",
+                "deontology and Kant",
+                "virtue ethics",
+                "logical fallacies",
+                "the mind-body problem",
+                "free will and determinism",
+                "epistemology and knowledge",
+                "Socrates and the Socratic method",
+                "existentialism",
+                "scientific method and critical thinking",
+            ],
+            [
+                ("Simple explain", "explain the concept simply."),
+                ("Key thinker", "name one key thinker and their idea."),
+                ("Real-world application", "give a real-world application."),
+                ("Contrast", "contrast it with an opposing view."),
+            ],
+        ),
+        (
+            "Economics and Business",
+            [
+                "supply and demand",
+                "GDP and macroeconomics",
+                "inflation and interest rates",
+                "stock markets and investing",
+                "startup and entrepreneurship",
+                "international trade",
+                "business strategy and competitive advantage",
+                "behavioral economics",
+                "cryptocurrency basics",
+                "the gig economy",
+            ],
+            [
+                ("Simple explain", "explain simply."),
+                ("Key concept", "define the key concept."),
+                ("Real example", "give a real-world example."),
+                ("Practical implication", "state one practical implication."),
+            ],
+        ),
+        (
+            "Technology and AI",
+            [
+                "machine learning basics",
+                "neural networks and deep learning",
+                "large language models",
+                "computer vision",
+                "cybersecurity threats",
+                "cloud computing",
+                "blockchain and cryptocurrency",
+                "quantum computing",
+                "the ethics of AI",
+                "automation and the future of work",
+            ],
+            [
+                ("Simple explain", "explain simply."),
+                ("Key fact", "state one key fact."),
+                ("Real-world use", "give a real-world use case."),
+                ("Challenge or risk", "state one key challenge or risk."),
             ],
         ),
         (
@@ -199,14 +359,12 @@ def _make_synthetic_examples() -> List[Dict[str, str]]:
                     f"Section: {section}\n"
                     f"When the user asks about {subject}, {instruction}"
                 )
-                examples.append(
-                    {
-                        "topic": topic,
-                        "section": section,
-                        "text": text,
-                        "source": "synthetic/llm_200_examples",
-                    }
-                )
+                examples.append({
+                    "topic": topic,
+                    "section": section,
+                    "text": text,
+                    "source": "synthetic/llm_expanded_examples",
+                })
                 counter += 1
 
     return examples
@@ -214,13 +372,11 @@ def _make_synthetic_examples() -> List[Dict[str, str]]:
 
 def _make_memory_examples() -> List[Dict[str, str]]:
     examples: List[Dict[str, str]] = []
-
     for index, item in enumerate(load_chat_memory_records(), start=1):
         question = str(item.get("question", "")).strip()
         answer = str(item.get("answer", "")).strip()
         if not question or not answer:
             continue
-
         topic = str(item.get("topic", "Chat Memory") or "Chat Memory").strip() or "Chat Memory"
         source = str(item.get("source", "memory/chat_memory.jsonl")).strip()
         section = f"Interaction {index:04d}"
@@ -231,16 +387,13 @@ def _make_memory_examples() -> List[Dict[str, str]]:
             f"Assistant: {answer}"
         )
         memory_key = str(item.get("memory_key", "")).strip()
-        examples.append(
-            {
-                "topic": topic,
-                "section": section,
-                "text": text,
-                "source": source,
-                "memory_key": memory_key,
-            }
-        )
-
+        examples.append({
+            "topic": topic,
+            "section": section,
+            "text": text,
+            "source": source,
+            "memory_key": memory_key,
+        })
     return examples
 
 
@@ -249,18 +402,21 @@ def build_training_data() -> str:
     TRAIN_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     all_chunks: List[Dict[str, str]] = []
+    file_count = 0
 
     for path in sorted(KNOWLEDGE_DIR.rglob("*.md")):
         topic, sections = _extract_sections(path)
         if not sections:
             continue
-        chunks = _make_chunks(topic, sections)
         rel_source = str(path.relative_to(KNOWLEDGE_DIR)).replace("\\", "/")
+        chunks = _make_chunks(topic, sections, source=rel_source)
         for item in chunks:
             text = item.get("text", "")
-            item["source"] = rel_source
             item["text"] = f"{text}\nSource: {rel_source}"
         all_chunks.extend(chunks)
+        file_count += 1
+
+    print(f"[build] Processed {file_count} knowledge files.")
 
     for item in _make_synthetic_examples():
         text = item.get("text", "").strip()
@@ -302,8 +458,8 @@ def build_training_data() -> str:
             f.write(json.dumps(row, ensure_ascii=True) + "\n")
 
     return (
-        f"Built {len(rows)} trainable examples from knowledge files in '{KNOWLEDGE_DIR}' "
-        f"and wrote '{TRAIN_DATA_FILE}'."
+        f"Built {len(rows)} training examples from {file_count} knowledge files "
+        f"in '{KNOWLEDGE_DIR}'. Wrote '{TRAIN_DATA_FILE}'."
     )
 
 
