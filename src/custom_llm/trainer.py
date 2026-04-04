@@ -102,7 +102,7 @@ def _build_training_sequences(
     sequences: List[List[int]] = []
     for text in corpus:
         ids = tokenizer.encode(text, add_bos=True, add_eos=True)
-        # Sliding window with 50 % stride to increase sample diversity
+        # Sliding window with 50% stride to increase sample diversity
         stride = max(1, context_length // 2)
         for start in range(0, max(1, len(ids) - context_length), stride):
             chunk = ids[start:start + context_length + 1]
