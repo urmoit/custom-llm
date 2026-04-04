@@ -56,8 +56,10 @@ def _command_specs() -> Dict[str, str]:
     return {
         "help": "Show commands",
         "version": "Show web, CLI, and model versions",
+        "model_info": "Show custom LLM architecture and stats",
         "gpu_status": "Show CUDA and training backend status",
         "search": "Force web search",
+        "retrain": "Learn from conversations and retrain the model",
         "refresh": "Refresh chat session and reload the page",
         "clear": "Clear screen",
         "exit": "Quit",
@@ -108,657 +110,981 @@ def _format_version_summary() -> str:
     return f"Web UI v{web_version} | CLI UI v{cli_version} | LLM model v{llm_version}"
 
 
+def _model_info_dict() -> Dict[str, Any]:
+    """Return a JSON-serialisable dict of custom LLM metadata from the saved artifact."""
+    from .config import MODEL_META_FILE
+    if not MODEL_META_FILE.exists():
+        return {"backend": "none", "status": "No model trained yet. Run build_info_and_train.bat."}
+    try:
+        meta = json.loads(MODEL_META_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"backend": "unknown", "status": "Could not read model metadata."}
+
+    backend = meta.get("backend", "unknown")
+    result: Dict[str, Any] = {
+        "backend": backend,
+        "model_name": meta.get("model_name", "unknown"),
+        "device": meta.get("device", "cpu"),
+        "corpus_size": meta.get("corpus_size", 0),
+    }
+    if backend == "custom":
+        result["num_parameters"] = meta.get("num_parameters", 0)
+        result["vocab_size"] = meta.get("vocab_size", 0)
+        result["d_model"] = meta.get("d_model", 256)
+        result["n_layers"] = meta.get("n_layers", 4)
+        result["n_heads"] = meta.get("n_heads", 4)
+        result["context_length"] = meta.get("context_length", 256)
+        result["epochs"] = meta.get("epochs", 0)
+        result["status"] = "Custom transformer LLM (trained from scratch)"
+    elif backend == "tfidf":
+        result["vocab_size"] = meta.get("vocab_size", 0)
+        result["status"] = "TF-IDF retrieval (no generation)"
+    else:
+        result["status"] = meta.get("note", "")
+    return result
+
+
 def _html_page() -> str:
     version_text = html.escape(_format_version_summary())
+    info = _model_info_dict()
+    backend_label = html.escape(str(info.get("backend", "unknown")).upper())
+    params_val = info.get("num_parameters", 0)
+    params_text = html.escape(f"{int(params_val):,}" if params_val else "—")
+    vocab_val = info.get("vocab_size", 0)
+    vocab_text = html.escape(f"{int(vocab_val):,}" if vocab_val else "—")
+    corpus_val = info.get("corpus_size", 0)
+    corpus_text = html.escape(f"{int(corpus_val):,}" if corpus_val else "—")
+    cmds_json = json.dumps([{"name": k, "desc": v} for k, v in _command_specs().items()])
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Custom LLM Web UI</title>
+  <title>Custom LLM</title>
   <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
     :root {{
       color-scheme: dark;
-      --bg: #07111f;
-      --panel: rgba(12, 20, 36, 0.86);
-      --panel-2: rgba(18, 28, 48, 0.92);
-      --border: rgba(148, 163, 184, 0.18);
-      --text: #e5eefb;
-      --muted: #94a3b8;
-      --accent: #66e3c4;
-      --accent-2: #7da8ff;
-      --user: #142340;
-      --bot: #112f2a;
-      --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      --bg:          #212121;
+      --sidebar-bg:  #171717;
+      --input-bg:    #2f2f2f;
+      --popup-bg:    #2a2a2a;
+      --popup-hover: #383838;
+      --border:      rgba(255,255,255,0.10);
+      --text:        #ececec;
+      --muted:       #8e8ea0;
+      --accent:      #10a37f;
+      --accent-blue: #7da8ff;
+      --user-bg:     #2f2f2f;
+      --shadow-lg:   0 8px 32px rgba(0,0,0,.55);
     }}
 
-    * {{ box-sizing: border-box; }}
+    html, body {{ height: 100%; overflow: hidden; }}
 
     body {{
-      margin: 0;
-      min-height: 100vh;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                   "Segoe UI", sans-serif;
+      background: var(--bg);
       color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(125, 168, 255, 0.24), transparent 28%),
-        radial-gradient(circle at top right, rgba(102, 227, 196, 0.16), transparent 26%),
-        linear-gradient(180deg, #07111f 0%, #050b15 100%);
+      font-size: 15px;
+      line-height: 1.55;
     }}
 
-    .shell {{
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 28px 18px 20px;
+    /* ── layout ──────────────────────────────────────────────────────── */
+    .app {{
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
     }}
 
-    .hero {{
-      display: grid;
-      grid-template-columns: 1.35fr 0.9fr;
-      gap: 16px;
-      align-items: stretch;
-      margin-bottom: 16px;
-    }}
-
-    .card {{
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
+    /* ── sidebar ─────────────────────────────────────────────────────── */
+    .sidebar {{
+      width: 264px;
+      flex-shrink: 0;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 20px 16px 24px;
+      gap: 24px;
     }}
 
     .brand {{
-      padding: 22px 22px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: 4px;
     }}
+    .brand-icon {{
+      width: 34px; height: 34px;
+      background: var(--accent);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px;
+    }}
+    .brand-title {{ font-size: 16px; font-weight: 700; }}
+    .brand-sub {{ font-size: 11px; color: var(--muted); margin-top: 1px; }}
 
-    .kicker {{
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      font-size: 12px;
+    .sidebar-section-title {{
+      font-size: 11px;
       font-weight: 700;
-      margin-bottom: 10px;
-    }}
-
-    h1 {{
-      margin: 0;
-      font-size: clamp(30px, 4vw, 54px);
-      line-height: 1.03;
-      letter-spacing: -0.04em;
-    }}
-
-    .sub {{
-      margin: 14px 0 0;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
       color: var(--muted);
-      max-width: 62ch;
-      line-height: 1.6;
+      margin-bottom: 8px;
     }}
 
-    .stats {{
+    .stat-grid {{
       display: grid;
-      gap: 12px;
-      padding: 18px;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
     }}
-
-    .stat {{
-      padding: 16px;
-      border-radius: 18px;
-      background: var(--panel-2);
+    .stat-chip {{
+      background: rgba(255,255,255,0.04);
       border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
     }}
+    .stat-chip .s-label {{ font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }}
+    .stat-chip .s-val   {{ font-size: 13px; font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .stat-chip.full {{ grid-column: 1 / -1; }}
 
-    .stat .label {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; }}
-    .stat .value {{ margin-top: 6px; font-size: 16px; font-weight: 600; }}
-
-    .layout {{
-      display: grid;
-      grid-template-columns: 300px 1fr;
-      gap: 16px;
-      min-height: 72vh;
-    }}
-
-    .sidebar {{ padding: 18px; }}
-    .sidebar h2 {{ margin: 0 0 12px; font-size: 18px; }}
-    .sidebar p {{ margin: 0 0 16px; color: var(--muted); line-height: 1.6; }}
-    .sidebar-section {{ margin-top: 18px; }}
-    .chips {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-    .chip {{
+    .prompt-list {{ display: flex; flex-direction: column; gap: 4px; }}
+    .prompt-btn {{
+      background: rgba(255,255,255,0.03);
       border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
       color: var(--text);
-      border-radius: 999px;
-      padding: 10px 12px;
-      cursor: pointer;
-      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-    }}
-    .chip:hover {{ transform: translateY(-1px); border-color: rgba(102, 227, 196, 0.45); background: rgba(102, 227, 196, 0.08); }}
-    .command-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
-    .command-btn {{
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--text);
-      border-radius: 14px;
-      padding: 11px 12px;
-      cursor: pointer;
-      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
       text-align: left;
+      padding: 9px 12px;
+      border-radius: 10px;
+      cursor: pointer;
       font-size: 13px;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }}
-    .command-btn:hover {{ transform: translateY(-1px); border-color: rgba(125, 168, 255, 0.45); background: rgba(125, 168, 255, 0.08); }}
-    .command-btn .cmd {{ display: block; font-weight: 700; color: var(--accent); margin-bottom: 4px; font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace; }}
-    .command-btn .desc {{ color: var(--muted); line-height: 1.35; }}
+    .prompt-btn:hover {{ background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.2); }}
 
-    .chat {{ display: flex; flex-direction: column; overflow: hidden; }}
-    .messages {{
+    .sidebar-status {{
+      margin-top: auto;
+      font-size: 12px;
+      color: var(--muted);
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }}
+
+    /* ── main area ───────────────────────────────────────────────────── */
+    .main {{
       flex: 1;
-      padding: 18px;
-      overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      scroll-behavior: smooth;
+      overflow: hidden;
     }}
 
-    .message {{
-      max-width: min(760px, 92%);
-      padding: 14px 16px;
-      border-radius: 18px;
-      border: 1px solid var(--border);
-      line-height: 1.55;
-      word-wrap: break-word;
-    }}
-    .message.user {{ align-self: flex-end; background: var(--user); border-top-right-radius: 8px; }}
-    .message.bot {{ align-self: flex-start; background: var(--bot); border-top-left-radius: 8px; }}
-    .message.bot.script {{ max-width: min(900px, 96%); }}
-    .message-body {{ white-space: pre-wrap; }}
-    .meta {{ margin-top: 8px; color: var(--muted); font-size: 12px; }}
-    .script-intro {{ margin-bottom: 14px; white-space: pre-wrap; }}
-    .script-usage {{ margin-top: 12px; color: var(--muted); white-space: pre-wrap; }}
-    .code-card {{
-      position: relative;
-      border: 1px solid rgba(125, 168, 255, 0.24);
-      border-radius: 16px;
-      background: rgba(2, 7, 18, 0.95);
-      overflow: hidden;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-    }}
-    .code-head {{
+    /* ── topbar ──────────────────────────────────────────────────────── */
+    .topbar {{
       display: flex;
-      justify-content: flex-end;
-      padding: 10px 10px 0;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 12px;
+    }}
+    .topbar-title {{ font-weight: 600; font-size: 14px; color: var(--muted); }}
+    .topbar-actions {{ display: flex; gap: 8px; }}
+    .topbar-btn {{
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background .15s;
+    }}
+    .topbar-btn:hover {{ background: rgba(255,255,255,0.10); }}
+    .topbar-kbd {{
+      font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+      background: rgba(255,255,255,.08);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 12px;
+    }}
+
+    /* ── messages ────────────────────────────────────────────────────── */
+    .messages {{
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 0 24px;
+    }}
+
+    .msg-row {{
+      display: flex;
+      padding: 8px 24px;
+      gap: 14px;
+      max-width: 860px;
+      margin: 0 auto;
+      width: 100%;
+    }}
+    .msg-row.user {{ flex-direction: row-reverse; }}
+
+    .avatar {{
+      width: 32px; height: 32px; border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; margin-top: 2px;
+    }}
+    .avatar.bot  {{ background: var(--accent); color: #fff; }}
+    .avatar.user {{ background: #5b5fc7; color: #fff; }}
+    .avatar.sys  {{ background: #6b7280; color: #fff; font-size: 10px; }}
+
+    .msg-content {{ flex: 1; min-width: 0; }}
+    .msg-row.user .msg-content {{ text-align: right; }}
+
+    .msg-bubble {{
+      display: inline-block;
+      max-width: 100%;
+      text-align: left;
+    }}
+    .msg-row.user .msg-bubble {{
+      background: var(--user-bg);
+      border: 1px solid var(--border);
+      border-radius: 18px 18px 6px 18px;
+      padding: 10px 14px;
+    }}
+    .msg-row.bot .msg-bubble {{
+      border-radius: 18px 18px 18px 6px;
+    }}
+    .msg-row.bot.script .msg-bubble {{ display: block; }}
+
+    .msg-text {{ white-space: pre-wrap; word-wrap: break-word; }}
+    .msg-meta {{ margin-top: 5px; font-size: 11px; color: var(--muted); }}
+
+    /* code blocks */
+    .code-wrap {{
+      margin-top: 8px;
+      border: 1px solid rgba(125,168,255,0.22);
+      border-radius: 12px;
+      background: #0d0d0d;
+      overflow: hidden;
+    }}
+    .code-header {{
+      display: flex; justify-content: flex-end;
+      padding: 8px 10px 0;
     }}
     .copy-btn {{
-      border: 1px solid rgba(148, 163, 184, 0.22);
-      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(148,163,184,0.2);
+      background: rgba(255,255,255,0.04);
       color: var(--text);
-      border-radius: 10px;
-      padding: 6px 10px;
-      cursor: pointer;
+      border-radius: 8px;
+      padding: 4px 10px;
       font-size: 12px;
-      line-height: 1;
+      cursor: pointer;
     }}
-    .copy-btn:hover {{ background: rgba(255, 255, 255, 0.08); }}
-    .code-card pre {{
-      margin: 0;
-      padding: 12px 16px 16px;
-      color: #d7e8ff;
-      font-size: 13px;
-      line-height: 1.55;
+    .copy-btn:hover {{ background: rgba(255,255,255,0.08); }}
+    .code-wrap pre {{
+      margin: 0; padding: 10px 16px 14px;
+      color: #c8d5f5;
+      font-size: 13px; line-height: 1.55;
       overflow-x: auto;
-      font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, Monaco, monospace;
-      white-space: pre;
+      font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
     }}
 
-    .composer {{
-      padding: 16px;
-      border-top: 1px solid var(--border);
-      background: rgba(4, 10, 18, 0.78);
+    /* thinking indicator */
+    .thinking-dots span {{
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      margin: 0 2px;
+      animation: bounce 1.2s infinite ease-in-out;
+    }}
+    .thinking-dots span:nth-child(1) {{ animation-delay: 0s; }}
+    .thinking-dots span:nth-child(2) {{ animation-delay: .2s; }}
+    .thinking-dots span:nth-child(3) {{ animation-delay: .4s; }}
+    @keyframes bounce {{
+      0%, 80%, 100% {{ transform: translateY(0); opacity: .5; }}
+      40%            {{ transform: translateY(-5px); opacity: 1; }}
     }}
 
-    .row {{ display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }}
-    textarea {{
+    /* ── composer ────────────────────────────────────────────────────── */
+    .composer-wrap {{
+      position: relative;
+      flex-shrink: 0;
+      padding: 0 20px 20px;
+      max-width: 860px;
+      margin: 0 auto;
       width: 100%;
-      min-height: 58px;
-      max-height: 180px;
-      resize: vertical;
-      padding: 14px 15px;
-      border-radius: 16px;
+    }}
+
+    .cmd-popup {{
+      position: absolute;
+      bottom: calc(100% - 4px);
+      left: 20px; right: 20px;
+      background: var(--popup-bg);
       border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      display: none;
+      z-index: 200;
+      max-height: 320px;
+      overflow-y: auto;
+    }}
+    .cmd-popup-header {{
+      padding: 8px 16px 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }}
+    .cmd-item {{
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 9px 16px;
+      width: 100%;
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+      border-radius: 0;
+      color: var(--text);
+      font-size: 14px;
+      transition: background .1s;
+    }}
+    .cmd-item:hover, .cmd-item.active {{
+      background: var(--popup-hover);
+    }}
+    .cmd-item-name {{
+      font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+      font-weight: 700;
+      color: var(--accent);
+      min-width: 130px;
+      flex-shrink: 0;
+    }}
+    .cmd-item-desc {{ color: var(--muted); font-size: 13px; }}
+
+    .composer-box {{
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      background: var(--input-bg);
+      border: 1.5px solid var(--border);
+      border-radius: 16px;
+      padding: 10px 12px 10px 16px;
+      transition: border-color .15s;
+    }}
+    .composer-box:focus-within {{
+      border-color: var(--accent);
+    }}
+    .composer-box textarea {{
+      flex: 1;
+      background: none;
+      border: none;
       color: var(--text);
       font: inherit;
+      font-size: 15px;
+      resize: none;
+      min-height: 26px;
+      max-height: 160px;
       outline: none;
+      padding: 0;
+      line-height: 1.55;
     }}
-    textarea:focus {{ border-color: rgba(102, 227, 196, 0.5); box-shadow: 0 0 0 4px rgba(102, 227, 196, 0.08); }}
-
-    .actions {{ display: flex; gap: 10px; flex-wrap: wrap; }}
-    button {{
-      border: 0;
-      border-radius: 14px;
-      padding: 14px 16px;
-      font: inherit;
-      font-weight: 700;
+    .composer-box textarea::placeholder {{ color: var(--muted); }}
+    .send-btn {{
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
       cursor: pointer;
-      transition: transform 0.15s ease, opacity 0.15s ease;
+      flex-shrink: 0;
+      transition: opacity .15s, transform .1s;
+      font-size: 16px;
     }}
-    button:hover {{ transform: translateY(-1px); }}
-    .primary {{ background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #04111d; }}
-    .ghost {{ background: rgba(255, 255, 255, 0.06); color: var(--text); border: 1px solid var(--border); }}
+    .send-btn:hover {{ opacity: .85; transform: translateY(-1px); }}
+    .send-btn:disabled {{ opacity: .4; cursor: not-allowed; transform: none; }}
 
-    .status {{ margin-top: 10px; color: var(--muted); min-height: 20px; font-size: 13px; }}
+    .composer-hint {{
+      margin-top: 7px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }}
 
-    @media (max-width: 900px) {{
-      .hero, .layout {{ grid-template-columns: 1fr; }}
-      .shell {{ padding: 16px; }}
-      .message {{ max-width: 100%; }}
+    /* ── mobile ──────────────────────────────────────────────────────── */
+    @media (max-width: 700px) {{
+      .sidebar {{ display: none; }}
+      .msg-row {{ padding: 8px 14px; }}
+      .composer-wrap {{ padding: 0 12px 14px; }}
     }}
   </style>
 </head>
 <body>
-  <div class="shell">
-    <div class="hero">
-      <section class="card brand">
-        <div class="kicker">Local browser assistant</div>
-        <h1>Custom LLM Web UI</h1>
-        <p class="sub">A local chat interface for your retrieval-based assistant. It keeps the same knowledge, versions, and behavior as the CLI, but runs in the browser.</p>
-      </section>
-      <aside class="card stats">
-        <div class="stat">
-          <div class="label">Versions</div>
-          <div class="value">{version_text}</div>
-        </div>
-        <div class="stat">
-          <div class="label">Open locally</div>
-          <div class="value">http://{html.escape(HOST_DEFAULT)}:{PORT_DEFAULT}</div>
-        </div>
-      </aside>
-    </div>
+  <div class="app">
 
-    <div class="layout">
-      <aside class="card sidebar">
-        <h2>Quick prompts</h2>
-        <p>Pick a starter prompt, or write your own. The browser UI talks to the same local assistant backend.</p>
-        <div class="chips" id="chips">
-          <button class="chip" data-prompt="what are ongoing policy challenges in usa">USA policy challenges</button>
-          <button class="chip" data-prompt="generate python script to organize files by extension">Python file organizer</button>
-          <button class="chip" data-prompt="what can you tell me about python scripting basics">Python basics</button>
-          <button class="chip" data-prompt="hello">Greeting</button>
+    <!-- ── sidebar ──────────────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">🤖</div>
+        <div>
+          <div class="brand-title">Custom LLM</div>
+          <div class="brand-sub">Local AI — no cloud</div>
         </div>
-        <div class="sidebar-section">
-          <h2>Commands</h2>
-          <p>These match the CLI commands. Click one to insert it into the box, then send it.</p>
-          <div class="command-grid" id="commands">
-            <button class="command-btn" data-command="/help"><span class="cmd">/help</span><span class="desc">Show commands</span></button>
-            <button class="command-btn" data-command="/version"><span class="cmd">/version</span><span class="desc">Show versions</span></button>
-            <button class="command-btn" data-command="/gpu_status"><span class="cmd">/gpu_status</span><span class="desc">Show GPU status</span></button>
-            <button class="command-btn" data-command="/search "><span class="cmd">/search</span><span class="desc">Force web search</span></button>
-            <button class="command-btn" data-command="/refresh"><span class="cmd">/refresh</span><span class="desc">Reload page + backend</span></button>
-            <button class="command-btn" data-command="/clear"><span class="cmd">/clear</span><span class="desc">Clear chat</span></button>
-            <button class="command-btn" data-command="/exit"><span class="cmd">/exit</span><span class="desc">Close the session</span></button>
-          </div>
-        </div>
-        <div class="status" id="sidebarStatus">Ready.</div>
-      </aside>
+      </div>
 
-      <main class="card chat">
-        <div class="messages" id="messages">
-          <div class="message bot">
-            Hello. Ask a question or try one of the quick prompts.
-            <div class="meta">Local assistant ready</div>
+      <div>
+        <div class="sidebar-section-title">Model</div>
+        <div class="stat-grid">
+          <div class="stat-chip full">
+            <div class="s-label">Backend</div>
+            <div class="s-val">{backend_label}</div>
+          </div>
+          <div class="stat-chip">
+            <div class="s-label">Params</div>
+            <div class="s-val">{params_text}</div>
+          </div>
+          <div class="stat-chip">
+            <div class="s-label">Vocab</div>
+            <div class="s-val">{vocab_text}</div>
+          </div>
+          <div class="stat-chip full">
+            <div class="s-label">Corpus docs</div>
+            <div class="s-val">{corpus_text}</div>
           </div>
         </div>
-        <div class="composer">
-          <div class="row">
-            <textarea id="input" placeholder="Type your message here..." rows="2"></textarea>
-            <div class="actions">
-              <button class="primary" id="sendBtn">Send</button>
-              <button class="ghost" id="clearBtn">Clear</button>
-            </div>
-          </div>
-          <div class="status" id="status">Type a message and press Enter to send.</div>
+      </div>
+
+      <div>
+        <div class="sidebar-section-title">Quick prompts</div>
+        <div class="prompt-list" id="prompts">
+          <button class="prompt-btn" data-prompt="hello">👋 Say hello</button>
+          <button class="prompt-btn" data-prompt="what can you do">🤔 What can you do?</button>
+          <button class="prompt-btn" data-prompt="generate python script to organize files by extension">🐍 Python file organizer</button>
+          <button class="prompt-btn" data-prompt="what are ongoing policy challenges in usa">🇺🇸 USA policy challenges</button>
         </div>
-      </main>
+      </div>
+
+      <div class="sidebar-status" id="sidebarStatus">{version_text}</div>
+    </aside>
+
+    <!-- ── main ─────────────────────────────────────────────── -->
+    <div class="main">
+
+      <!-- topbar -->
+      <div class="topbar">
+        <span class="topbar-title">Chat — type <kbd class="topbar-kbd">/</kbd> for commands</span>
+        <div class="topbar-actions">
+          <button class="topbar-btn" id="retrainBtn">⟳ Retrain</button>
+          <button class="topbar-btn danger" id="clearBtn">Clear chat</button>
+        </div>
+      </div>
+
+      <!-- messages -->
+      <div class="messages" id="messages"></div>
+
+      <!-- composer -->
+      <div class="composer-wrap">
+        <div class="cmd-popup" id="cmdPopup">
+          <div class="cmd-popup-header">Commands</div>
+          <div id="cmdItems"></div>
+        </div>
+        <div class="composer-box">
+          <textarea id="input" placeholder="Message Custom LLM — type / for commands" rows="1"></textarea>
+          <button class="send-btn" id="sendBtn" title="Send (Enter)">&#9650;</button>
+        </div>
+        <div class="composer-hint" id="hint">Enter to send &nbsp;·&nbsp; Shift+Enter for newline &nbsp;·&nbsp; / for commands</div>
+      </div>
     </div>
   </div>
 
   <script>
-    const messages = document.getElementById('messages');
-    const input = document.getElementById('input');
-    const status = document.getElementById('status');
+    /* ── data ─────────────────────────────────────────────────────── */
+    const COMMANDS = {cmds_json};
+
+    /* ── refs ─────────────────────────────────────────────────────── */
+    const messagesEl = document.getElementById('messages');
+    const inputEl    = document.getElementById('input');
+    const sendBtn    = document.getElementById('sendBtn');
+    const clearBtn   = document.getElementById('clearBtn');
+    const retrainBtn = document.getElementById('retrainBtn');
+    const cmdPopup   = document.getElementById('cmdPopup');
+    const cmdItems   = document.getElementById('cmdItems');
+    const hintEl     = document.getElementById('hint');
     const sidebarStatus = document.getElementById('sidebarStatus');
-    const sendBtn = document.getElementById('sendBtn');
-    const clearBtn = document.getElementById('clearBtn');
-    const chips = document.getElementById('chips');
-    const commands = document.getElementById('commands');
+    const promptList = document.getElementById('prompts');
 
-    const COMMAND_LINES = [
-      '/help      Show commands',
-      '/version   Show web, CLI, and model versions',
-      '/gpu_status Show CUDA and training backend status',
-      '/search    Force web search',
-      '/refresh   Refresh chat session and reload the page',
-      '/clear     Clear screen',
-      '/exit      Quit',
-    ];
+    /* ── state ────────────────────────────────────────────────────── */
+    let popupSel = 0;
+    let isWaiting = false;
 
-    function scrollToBottom() {{
-      messages.scrollTop = messages.scrollHeight;
+    /* ── auto-resize textarea ─────────────────────────────────────── */
+    function autoResize() {{
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+    }}
+    inputEl.addEventListener('input', autoResize);
+
+    /* ── status helper ────────────────────────────────────────────── */
+    function setHint(txt) {{
+      hintEl.textContent = txt;
+      sidebarStatus.textContent = txt;
     }}
 
-    function setStatus(text) {{
-      status.textContent = text;
-      sidebarStatus.textContent = text;
+    /* ── scroll ───────────────────────────────────────────────────── */
+    function scrollBottom() {{
+      messagesEl.scrollTop = messagesEl.scrollHeight;
     }}
 
-    function clearMessages(includeGreeting = true) {{
-      messages.innerHTML = '';
-      if (includeGreeting) {{
-        addMessage(
-          'Hello. Ask a question or try one of the quick prompts.',
-          'bot',
-          'Local assistant ready',
-          'plain'
-        );
-      }}
-    }}
-
-    function makeMetaNode(meta) {{
-      if (!meta) return null;
-      const metaNode = document.createElement('div');
-      metaNode.className = 'meta';
-      metaNode.textContent = meta;
-      return metaNode;
-    }}
-
-    function createCopyButton(code) {{
-      const button = document.createElement('button');
-      button.className = 'copy-btn';
-      button.type = 'button';
-      button.textContent = 'Copy';
-      button.addEventListener('click', async () => {{
+    /* ── message rendering ────────────────────────────────────────── */
+    function makeCopyBtn(code) {{
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', async () => {{
         try {{
           await navigator.clipboard.writeText(code);
-          button.textContent = 'Copied';
-          setTimeout(() => {{ button.textContent = 'Copy'; }}, 1400);
-        }} catch (error) {{
-          button.textContent = 'Copy failed';
-          setTimeout(() => {{ button.textContent = 'Copy'; }}, 1400);
+          btn.textContent = 'Copied!';
+          setTimeout(() => {{ btn.textContent = 'Copy'; }}, 1400);
+        }} catch (_) {{
+          btn.textContent = 'Failed';
+          setTimeout(() => {{ btn.textContent = 'Copy'; }}, 1400);
         }}
       }});
-      return button;
+      return btn;
     }}
 
-    function splitScriptAnswer(text) {{
-      const usageMarker = '\\nUsage:';
-      let usage = '';
-      let body = text.trim();
-
-      const usageIndex = body.indexOf(usageMarker);
-      if (usageIndex >= 0) {{
-        usage = body.slice(usageIndex + 1).trim();
-        body = body.slice(0, usageIndex).trimEnd();
-      }}
-
-      const separator = '\\n\\n';
-      const introBreak = body.indexOf(separator);
-      if (introBreak < 0) {{
-        return {{ intro: '', code: body, usage }};
-      }}
-
-      const intro = body.slice(0, introBreak).trim();
-      const code = body.slice(introBreak + separator.length).trim();
-      return {{ intro, code, usage }};
-    }}
-
-    function createCodeCard(code) {{
-      const card = document.createElement('div');
-      card.className = 'code-card';
-
-      const head = document.createElement('div');
-      head.className = 'code-head';
-      head.appendChild(createCopyButton(code));
-
+    function makeCodeBlock(code) {{
+      const wrap = document.createElement('div');
+      wrap.className = 'code-wrap';
+      const hdr = document.createElement('div');
+      hdr.className = 'code-header';
+      hdr.appendChild(makeCopyBtn(code));
       const pre = document.createElement('pre');
       pre.textContent = code;
-
-      card.appendChild(head);
-      card.appendChild(pre);
-      return card;
+      wrap.appendChild(hdr);
+      wrap.appendChild(pre);
+      return wrap;
     }}
 
-    function createPlainBody(text) {{
-      const body = document.createElement('div');
-      body.className = 'message-body';
-      body.textContent = text;
-      return body;
-    }}
+    function renderMessageContent(text, isScript) {{
+      const frag = document.createDocumentFragment();
 
-    function createScriptBody(text) {{
-      const parts = splitScriptAnswer(text);
-      const wrapper = document.createElement('div');
-
-      if (parts.intro) {{
-        const intro = document.createElement('div');
-        intro.className = 'script-intro';
-        intro.textContent = parts.intro;
-        wrapper.appendChild(intro);
-      }}
-
-      if (parts.code) {{
-        wrapper.appendChild(createCodeCard(parts.code));
-      }}
-
-      if (parts.usage) {{
-        const usage = document.createElement('div');
-        usage.className = 'script-usage';
-        usage.textContent = parts.usage;
-        wrapper.appendChild(usage);
-      }}
-
-      return wrapper;
-    }}
-
-    function addMessage(text, kind, meta, source) {{
-      const node = document.createElement('div');
-      node.className = 'message ' + kind;
-
-      if (kind === 'bot' && source === 'python-script-generator') {{
-        node.classList.add('script');
-        node.appendChild(createScriptBody(text));
-      }} else {{
-        node.appendChild(createPlainBody(text));
-      }}
-
-      const metaNode = makeMetaNode(meta);
-      if (metaNode) {{
-        node.appendChild(metaNode);
-      }}
-
-      messages.appendChild(node);
-      scrollToBottom();
-    }}
-
-    function showCommandList() {{
-      addMessage(COMMAND_LINES.join('\\n'), 'bot', 'CLI command list', 'plain');
-    }}
-
-    async function fetchJson(url, options) {{
-      const response = await fetch(url, options);
-      const data = await response.json();
-      if (!response.ok) {{
-        throw new Error(data.error || data.message || 'Request failed');
-      }}
-      return data;
-    }}
-
-    async function sendChat(prompt, forceWeb = false) {{
-      const message = prompt.trim();
-      if (!message) {{
-        return;
-      }}
-
-      addMessage(message, 'user');
-      input.value = '';
-      input.focus();
-      setStatus('Thinking...');
-
-      try {{
-        const data = await fetchJson('/api/chat', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ message, force_web: forceWeb }})
-        }});
-        const meta = 'source=' + data.source + ' | confidence=' + (data.confidence ?? 'n/a');
-        addMessage(data.answer, 'bot', meta, data.source);
-        setStatus('Ready.');
-      }} catch (error) {{
-        addMessage('Error: ' + error.message, 'bot', 'request failed', 'plain');
-        setStatus('Request failed.');
-      }}
-    }}
-
-    async function showVersion() {{
-      try {{
-        const data = await fetchJson('/api/meta');
-        addMessage(
-          'Web UI version: ' + data.web_ui_version + '\\nCLI UI version: ' + data.cli_version + '\\nLLM model version: ' + data.llm_version,
-          'bot',
-          'version info',
-          'plain'
-        );
-        setStatus('Ready.');
-      }} catch (error) {{
-        addMessage('Error: ' + error.message, 'bot', 'request failed', 'plain');
-        setStatus('Request failed.');
-      }}
-    }}
-
-    async function showGpuStatus() {{
-      try {{
-        const data = await fetchJson('/api/gpu_status');
-        addMessage(data.status, 'bot', 'system status', 'plain');
-        setStatus('Ready.');
-      }} catch (error) {{
-        addMessage('Error: ' + error.message, 'bot', 'request failed', 'plain');
-        setStatus('Request failed.');
-      }}
-    }}
-
-    async function refreshUi() {{
-      setStatus('Refreshing...');
-      try {{
-        await fetchJson('/api/refresh', {{ method: 'POST' }});
-        window.location.reload();
-      }} catch (error) {{
-        addMessage('Error: ' + error.message, 'bot', 'request failed', 'plain');
-        setStatus('Refresh failed.');
-      }}
-    }}
-
-    async function handleSlashCommand(rawValue) {{
-      const cmdline = rawValue.trim().replace(/^\\/+/, '');
-      if (!cmdline) {{
-        showCommandList();
-        return true;
-      }}
-
-      const parts = cmdline.split(/\\s+/, 2);
-      const cmd = parts[0].toLowerCase().replace(/-/g, '_');
-      const arg = parts.length > 1 ? parts[1].trim() : '';
-
-      if (cmd === 'help') {{
-        showCommandList();
-        return true;
-      }}
-      if (cmd === 'version') {{
-        await showVersion();
-        return true;
-      }}
-      if (cmd === 'gpu' || cmd === 'gpu_status') {{
-        await showGpuStatus();
-        return true;
-      }}
-      if (cmd === 'search') {{
-        if (!arg) {{
-          addMessage('Usage: /search <query>', 'bot', 'system', 'plain');
-          return true;
+      if (isScript) {{
+        const usageIdx = text.indexOf('\\nUsage:');
+        let usage = '';
+        let body = text.trim();
+        if (usageIdx >= 0) {{
+          usage = body.slice(usageIdx + 1).trim();
+          body = body.slice(0, usageIdx).trimEnd();
         }}
-        await sendChat(arg, true);
-        return true;
-      }}
-      if (cmd === 'refresh') {{
-        await refreshUi();
-        return true;
-      }}
-      if (cmd === 'clear') {{
-        clearMessages(true);
-        setStatus('Ready.');
-        return true;
-      }}
-      if (cmd === 'exit') {{
-        addMessage('Close this browser tab to exit.', 'bot', 'system', 'plain');
-        return true;
-      }}
-
-      addMessage('Unknown command. Type /help for the list.', 'bot', 'system', 'plain');
-      return true;
-    }}
-
-    async function submitInput() {{
-      const value = input.value.trim();
-      if (!value) {{
-        return;
-      }}
-
-      if (value.startsWith('/')) {{
-        input.value = '';
-        input.focus();
-        await handleSlashCommand(value);
-        return;
-      }}
-
-      await sendChat(value, false);
-    }}
-
-    sendBtn.addEventListener('click', submitInput);
-    clearBtn.addEventListener('click', () => {{
-      clearMessages(true);
-      setStatus('Ready.');
-      input.focus();
-    }});
-
-    chips.addEventListener('click', (event) => {{
-      const button = event.target.closest('button[data-prompt]');
-      if (!button) return;
-      input.value = button.dataset.prompt;
-      input.focus();
-      setStatus('Prompt loaded. Press Send.');
-    }});
-
-    commands.addEventListener('click', (event) => {{
-      const button = event.target.closest('button[data-command]');
-      if (!button) return;
-      input.value = button.dataset.command;
-      input.focus();
-      if (button.dataset.command === '/search ') {{
-        setStatus('Type a search query after /search.');
+        const sep = '\\n\\n';
+        const sepIdx = body.indexOf(sep);
+        let intro = '', code = body;
+        if (sepIdx >= 0) {{
+          intro = body.slice(0, sepIdx).trim();
+          code  = body.slice(sepIdx + sep.length).trim();
+        }}
+        if (intro) {{
+          const p = document.createElement('div');
+          p.className = 'msg-text';
+          p.style.marginBottom = '10px';
+          p.textContent = intro;
+          frag.appendChild(p);
+        }}
+        if (code) frag.appendChild(makeCodeBlock(code));
+        if (usage) {{
+          const u = document.createElement('div');
+          u.className = 'msg-text';
+          u.style.marginTop = '10px';
+          u.style.color = 'var(--muted)';
+          u.textContent = usage;
+          frag.appendChild(u);
+        }}
       }} else {{
-        setStatus('Command loaded. Press Send.');
+        const parts = text.split(/(```[\\s\\S]*?```)/g);
+        for (const part of parts) {{
+          if (part.startsWith('```') && part.endsWith('```')) {{
+            const inner = part.slice(3, -3).replace(/^[^\\n]*\\n/, '').trimEnd();
+            frag.appendChild(makeCodeBlock(inner || part.slice(3, -3)));
+          }} else if (part) {{
+            const d = document.createElement('div');
+            d.className = 'msg-text';
+            d.textContent = part;
+            frag.appendChild(d);
+          }}
+        }}
+      }}
+      return frag;
+    }}
+
+    function addMessage(text, role, meta, source) {{
+      const isScript = role === 'bot' && source === 'python-script-generator';
+      const row = document.createElement('div');
+      row.className = 'msg-row ' + role + (isScript ? ' script' : '');
+
+      const av = document.createElement('div');
+      av.className = 'avatar ' + (role === 'user' ? 'user' : role === 'system' ? 'sys' : 'bot');
+      av.textContent = role === 'user' ? 'You' : role === 'system' ? 'SYS' : 'AI';
+
+      const content = document.createElement('div');
+      content.className = 'msg-content';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble';
+      bubble.appendChild(renderMessageContent(text, isScript));
+
+      if (meta) {{
+        const m = document.createElement('div');
+        m.className = 'msg-meta';
+        m.textContent = meta;
+        bubble.appendChild(m);
+      }}
+
+      content.appendChild(bubble);
+      row.appendChild(av);
+      row.appendChild(content);
+      messagesEl.appendChild(row);
+      scrollBottom();
+      return row;
+    }}
+
+    function addThinking() {{
+      const row = document.createElement('div');
+      row.className = 'msg-row bot';
+      row.id = '__thinking__';
+
+      const av = document.createElement('div');
+      av.className = 'avatar bot';
+      av.textContent = 'AI';
+
+      const content = document.createElement('div');
+      content.className = 'msg-content';
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble';
+      const dots = document.createElement('div');
+      dots.className = 'thinking-dots';
+      dots.innerHTML = '<span></span><span></span><span></span>';
+      bubble.appendChild(dots);
+      content.appendChild(bubble);
+      row.appendChild(av);
+      row.appendChild(content);
+      messagesEl.appendChild(row);
+      scrollBottom();
+      return row;
+    }}
+
+    function removeThinking() {{
+      const el = document.getElementById('__thinking__');
+      if (el) el.remove();
+    }}
+
+    /* ── command popup ────────────────────────────────────────────── */
+    function filteredCmds(prefix) {{
+      const p = prefix.toLowerCase().replace(/-/g, '_');
+      return COMMANDS.filter(c => c.name.startsWith(p));
+    }}
+
+    function renderCmdPopup(list) {{
+      cmdItems.innerHTML = '';
+      list.forEach((cmd, i) => {{
+        const btn = document.createElement('button');
+        btn.className = 'cmd-item' + (i === popupSel ? ' active' : '');
+        btn.setAttribute('data-idx', String(i));
+
+        const nm = document.createElement('span');
+        nm.className = 'cmd-item-name';
+        nm.textContent = '/' + cmd.name;
+
+        const ds = document.createElement('span');
+        ds.className = 'cmd-item-desc';
+        ds.textContent = cmd.desc;
+
+        btn.appendChild(nm);
+        btn.appendChild(ds);
+        btn.addEventListener('mousedown', (e) => {{
+          e.preventDefault();
+          applyCommand(cmd);
+        }});
+        cmdItems.appendChild(btn);
+      }});
+    }}
+
+    function showPopup(prefix) {{
+      const list = filteredCmds(prefix);
+      if (!list.length) {{ hidePopup(); return; }}
+      popupSel = Math.min(popupSel, list.length - 1);
+      renderCmdPopup(list);
+      cmdPopup.style.display = 'block';
+    }}
+
+    function hidePopup() {{
+      cmdPopup.style.display = 'none';
+      popupSel = 0;
+    }}
+
+    function applyCommand(cmd) {{
+      const needsArg = ['search'].includes(cmd.name);
+      inputEl.value = '/' + cmd.name + (needsArg ? ' ' : '');
+      hidePopup();
+      autoResize();
+      inputEl.focus();
+      if (!needsArg) submitInput();
+    }}
+
+    function popupVisible() {{
+      return cmdPopup.style.display === 'block';
+    }}
+
+    /* ── input event ──────────────────────────────────────────────── */
+    inputEl.addEventListener('input', () => {{
+      const val = inputEl.value;
+      if (val.startsWith('/')) {{
+        popupSel = 0;
+        showPopup(val.slice(1));
+      }} else {{
+        hidePopup();
       }}
     }});
 
-    input.addEventListener('keydown', (event) => {{
-      if (event.key === 'Enter' && !event.shiftKey) {{
-        event.preventDefault();
+    /* ── keyboard ─────────────────────────────────────────────────── */
+    inputEl.addEventListener('keydown', (e) => {{
+      if (popupVisible()) {{
+        const list = filteredCmds(inputEl.value.slice(1));
+        if (e.key === 'ArrowDown') {{
+          e.preventDefault();
+          popupSel = Math.min(popupSel + 1, list.length - 1);
+          renderCmdPopup(list);
+          return;
+        }}
+        if (e.key === 'ArrowUp') {{
+          e.preventDefault();
+          popupSel = Math.max(0, popupSel - 1);
+          renderCmdPopup(list);
+          return;
+        }}
+        if (e.key === 'Tab' || e.key === 'Enter') {{
+          e.preventDefault();
+          if (list[popupSel]) applyCommand(list[popupSel]);
+          return;
+        }}
+        if (e.key === 'Escape') {{
+          e.preventDefault();
+          hidePopup();
+          return;
+        }}
+      }}
+      if (e.key === 'Enter' && !e.shiftKey) {{
+        e.preventDefault();
         submitInput();
       }}
     }});
 
-    clearMessages(true);
-    setStatus('Type a message or use a command.');
+    /* ── fetch helper ─────────────────────────────────────────────── */
+    async function fetchJson(url, opts) {{
+      const r = await fetch(url, opts);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || d.message || 'Request failed');
+      return d;
+    }}
+
+    /* ── command handlers ─────────────────────────────────────────── */
+    async function cmdHelp() {{
+      const lines = COMMANDS.map(c => ('/' + c.name).padEnd(16) + c.desc);
+      addMessage(lines.join('\\n'), 'system', 'Command list', 'plain');
+    }}
+
+    async function cmdVersion() {{
+      try {{
+        const d = await fetchJson('/api/meta');
+        addMessage(
+          'Web UI:  ' + d.web_ui_version + '\\nCLI UI:  ' + d.cli_version + '\\nLLM:     ' + d.llm_version,
+          'system', 'Versions', 'plain'
+        );
+      }} catch (err) {{
+        addMessage('Error: ' + err.message, 'system', 'error', 'plain');
+      }}
+    }}
+
+    async function cmdModelInfo() {{
+      try {{
+        const d = await fetchJson('/api/model_info');
+        const lines = [
+          'Backend:   ' + (d.backend || '?').toUpperCase(),
+          'Model:     ' + (d.model_name || '?'),
+          'Device:    ' + (d.device || 'cpu'),
+        ];
+        if (d.num_parameters) lines.push('Params:    ' + Number(d.num_parameters).toLocaleString());
+        if (d.vocab_size)     lines.push('Vocab:     ' + Number(d.vocab_size).toLocaleString());
+        if (d.d_model)        lines.push('d_model:   ' + d.d_model);
+        if (d.n_layers)       lines.push('n_layers:  ' + d.n_layers);
+        if (d.n_heads)        lines.push('n_heads:   ' + d.n_heads);
+        if (d.context_length) lines.push('ctx_len:   ' + d.context_length);
+        if (d.corpus_size)    lines.push('Corpus:    ' + Number(d.corpus_size).toLocaleString() + ' docs');
+        if (d.epochs)         lines.push('Epochs:    ' + d.epochs);
+        if (d.status)         lines.push('', d.status);
+        lines.push('', 'Use /retrain to rebuild model with your conversation history.');
+        addMessage(lines.join('\\n'), 'system', 'Model info', 'plain');
+      }} catch (err) {{
+        addMessage('Error: ' + err.message, 'system', 'error', 'plain');
+      }}
+    }}
+
+    async function cmdGpuStatus() {{
+      try {{
+        const d = await fetchJson('/api/gpu_status');
+        addMessage(d.status, 'system', 'GPU status', 'plain');
+      }} catch (err) {{
+        addMessage('Error: ' + err.message, 'system', 'error', 'plain');
+      }}
+    }}
+
+    async function cmdRefresh() {{
+      setHint('Refreshing session...');
+      try {{
+        await fetchJson('/api/refresh', {{ method: 'POST' }});
+        window.location.reload();
+      }} catch (err) {{
+        addMessage('Error: ' + err.message, 'system', 'error', 'plain');
+        setHint('Refresh failed.');
+      }}
+    }}
+
+    async function cmdRetrain() {{
+      setHint('Retraining... this may take a few minutes.');
+      retrainBtn.disabled = true;
+      const tRow = addMessage(
+        'Starting retrain — reading all knowledge files and your conversation history. Please wait...',
+        'system', null, 'plain'
+      );
+      try {{
+        const d = await fetchJson('/api/retrain', {{ method: 'POST' }});
+        addMessage(d.message || 'Retrain complete.', 'system', 'Retrain result', 'plain');
+        setHint('Retrain complete. Reload to refresh model stats.');
+      }} catch (err) {{
+        addMessage('Retrain failed: ' + err.message, 'system', 'error', 'plain');
+        setHint('Retrain failed.');
+      }} finally {{
+        retrainBtn.disabled = false;
+      }}
+    }}
+
+    /* ── chat ─────────────────────────────────────────────────────── */
+    async function sendChat(msg, forceWeb) {{
+      addMessage(msg, 'user');
+      inputEl.value = '';
+      autoResize();
+      setHint('Thinking...');
+      sendBtn.disabled = true;
+
+      const thinking = addThinking();
+      try {{
+        const d = await fetchJson('/api/chat', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ message: msg, force_web: !!forceWeb }})
+        }});
+        removeThinking();
+        const meta = 'source=' + d.source + ' | confidence=' + (d.confidence != null ? d.confidence : 'n/a');
+        addMessage(d.answer, 'bot', meta, d.source);
+        setHint('Ready.');
+      }} catch (err) {{
+        removeThinking();
+        addMessage('Error: ' + err.message, 'system', 'request failed', 'plain');
+        setHint('Request failed.');
+      }} finally {{
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }}
+    }}
+
+    /* ── submit ───────────────────────────────────────────────────── */
+    async function submitInput() {{
+      if (isWaiting) return;
+      const val = inputEl.value.trim();
+      if (!val) return;
+
+      hidePopup();
+
+      if (val.startsWith('/')) {{
+        inputEl.value = '';
+        autoResize();
+        const rest  = val.slice(1).trim();
+        const parts = rest.split(/\\s+/, 2);
+        const cmd   = parts[0].toLowerCase().replace(/-/g, '_');
+        const arg   = parts.length > 1 ? parts[1] : '';
+
+        if (!cmd)                       {{ await cmdHelp(); return; }}
+        if (cmd === 'help')             {{ await cmdHelp(); return; }}
+        if (cmd === 'version')          {{ await cmdVersion(); return; }}
+        if (cmd === 'model_info')       {{ await cmdModelInfo(); return; }}
+        if (cmd === 'gpu' || cmd === 'gpu_status') {{ await cmdGpuStatus(); return; }}
+        if (cmd === 'refresh')          {{ await cmdRefresh(); return; }}
+        if (cmd === 'retrain')          {{ await cmdRetrain(); return; }}
+        if (cmd === 'clear')            {{ clearChat(); return; }}
+        if (cmd === 'exit')             {{ addMessage('Close this browser tab to exit.', 'system', null, 'plain'); return; }}
+        if (cmd === 'search') {{
+          if (!arg) {{ addMessage('Usage: /search <query>', 'system', null, 'plain'); return; }}
+          await sendChat(arg, true);
+          return;
+        }}
+        addMessage('Unknown command. Type /help for the list.', 'system', null, 'plain');
+        return;
+      }}
+
+      if (val.toLowerCase().startsWith('search:')) {{
+        const q = val.slice(7).trim();
+        if (!q) {{ addMessage('Provide a query after "search:"', 'system', null, 'plain'); return; }}
+        await sendChat(q, true);
+        return;
+      }}
+
+      await sendChat(val, false);
+    }}
+
+    /* ── misc UI ──────────────────────────────────────────────────── */
+    function clearChat() {{
+      messagesEl.innerHTML = '';
+      addMessage('Chat cleared. Ask anything or type / for commands.', 'system', null, 'plain');
+      setHint('Ready.');
+    }}
+
+    /* ── wire up buttons ──────────────────────────────────────────── */
+    sendBtn.addEventListener('click', submitInput);
+    clearBtn.addEventListener('click', clearChat);
+    retrainBtn.addEventListener('click', cmdRetrain);
+
+    promptList.addEventListener('click', (e) => {{
+      const btn = e.target.closest('button[data-prompt]');
+      if (!btn) return;
+      inputEl.value = btn.dataset.prompt;
+      autoResize();
+      inputEl.focus();
+      setHint('Prompt loaded — press Enter to send.');
+    }});
+
+    document.addEventListener('click', (e) => {{
+      if (!cmdPopup.contains(e.target) && e.target !== inputEl) hidePopup();
+    }});
+
+    /* ── init ─────────────────────────────────────────────────────── */
+    addMessage(
+      'Hello! I am your local Custom LLM assistant.\\n\\nAsk me anything, or type / to see available commands. Your conversations are remembered and used to improve the model when you run /retrain.',
+      'bot', null, 'plain'
+    );
+    setHint('Enter to send  ·  Shift+Enter for newline  ·  / for commands');
+    inputEl.focus();
   </script>
 </body>
 </html>"""
+
 
 
 class _WebUIHandler(BaseHTTPRequestHandler):
@@ -794,6 +1120,10 @@ class _WebUIHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/gpu_status":
             _json_response(self, {"status": _gpu_status_text()})
+            return
+
+        if parsed.path == "/api/model_info":
+            _json_response(self, _model_info_dict())
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
@@ -832,6 +1162,18 @@ class _WebUIHandler(BaseHTTPRequestHandler):
                     "llm_version": llm_version,
                 },
             )
+            return
+
+        if parsed.path == "/api/retrain":
+            try:
+                msg = type(self).assistant.retrain_and_reload()
+                _json_response(self, {"message": msg, "status": "ok"})
+            except Exception as exc:
+                _json_response(
+                    self,
+                    {"error": str(exc), "status": "error"},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")

@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-04T09:56:36.751137+00:00",
+  "date": "2026-04-04",
+  "topic": "Chat Memory",
+  "section": "Interaction",
+  "question": "what is a transformer model",
+  "answer": "A transformer model is a deep learning architecture using self-attention.",
+  "source": "test",
+  "used_web": false,
+  "thinking": "test",
+  "confidence": 0.9,
+  "memory_key": "35edd22af73e1376e498c6855d2b29042ba03237"
+}
