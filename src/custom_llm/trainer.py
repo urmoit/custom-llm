@@ -105,7 +105,7 @@ def _build_training_sequences(
         # Sliding window with 50 % stride to increase sample diversity
         stride = max(1, context_length // 2)
         for start in range(0, max(1, len(ids) - context_length), stride):
-            chunk = ids[start: start + context_length + 1]
+            chunk = ids[start:start + context_length + 1]
             if len(chunk) > 1:
                 sequences.append(chunk)
     return sequences

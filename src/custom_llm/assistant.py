@@ -685,6 +685,10 @@ class SmartAssistant:
             from .model import CustomLanguageModel
             from .tokenizer import Tokenizer
 
+            # weights_only=False is intentional: the checkpoint is produced locally
+            # by train_custom_llm() and never downloaded from an external source,
+            # so it is trusted.  Switch to weights_only=True if the checkpoint format
+            # is ever changed to store only tensor state dicts.
             checkpoint = torch.load(CUSTOM_LLM_FILE, map_location="cpu", weights_only=False)
             cfg = checkpoint["config"]
             model = CustomLanguageModel(

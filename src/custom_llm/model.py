@@ -22,6 +22,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Minimum temperature to avoid division by zero during sampling
+_MIN_TEMPERATURE = 1e-8
+
 
 # ---------------------------------------------------------------------------
 # Building blocks
@@ -43,6 +46,8 @@ class MultiHeadSelfAttention(nn.Module):
             raise ValueError(f"d_model ({d_model}) must be divisible by n_heads ({n_heads})")
         self.n_heads = n_heads
         self.head_dim = d_model // n_heads
+        # Scale factor sqrt(head_dim) prevents dot-products from growing large
+        # in high dimensions, which would push softmax into near-zero gradient regions.
         self.scale = math.sqrt(self.head_dim)
 
         # Separate projections (no bias — following GPT-2 style)
@@ -285,7 +290,7 @@ class CustomLanguageModel(nn.Module):
             # Crop to the context window
             idx_ctx = idx[:, -self.context_length:]
             logits = self.forward(idx_ctx)
-            next_logits = logits[:, -1, :] / max(temperature, 1e-8)
+            next_logits = logits[:, -1, :] / max(temperature, _MIN_TEMPERATURE)
 
             # Top-k filtering
             if top_k > 0:

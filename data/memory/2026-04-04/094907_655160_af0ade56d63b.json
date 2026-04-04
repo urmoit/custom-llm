@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-04T09:49:07.655160+00:00",
+  "date": "2026-04-04",
+  "topic": "Chat Memory",
+  "section": "Interaction",
+  "question": "what is photosynthesis",
+  "answer": "I don't have strong local knowledge on that, so I searched the web: I could not fetch web results right now. Try these links: - https://duckduckgo.com/?q=what+is+photosynthesis - https://www.google.com/search?q=what+is+photosynthesis - https://en.wikipedia.org/wiki/Special:Search?search=what+is+photosynthesis",
+  "source": "web-search",
+  "used_web": true,
+  "thinking": "Local knowledge insufficient; fell back to web search.",
+  "confidence": null,
+  "memory_key": "af0ade56d63b61a2a471f820e33d2c50202a6ea4"
+}

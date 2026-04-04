@@ -51,7 +51,12 @@ class Tokenizer:
 
     @staticmethod
     def _tokenize_text(text: str) -> List[str]:
-        """Split text into lowercase word/punctuation tokens."""
+        r"""Split text into lowercase word/punctuation tokens.
+
+        The pattern captures:
+        - ``[a-z0-9]+(?:'[a-z]+)?`` — words (optionally with contractions like "don't")
+        - ``[.,!?;:()\[\]{}\"/\\-]``  — common punctuation as individual tokens
+        """
         text = text.lower()
         tokens = re.findall(r"[a-z0-9]+(?:'[a-z]+)?|[.,!?;:()\[\]{}\"/\\-]", text)
         return tokens
