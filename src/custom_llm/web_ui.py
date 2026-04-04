@@ -305,7 +305,13 @@ def _html_page() -> str:
       transition: background .15s;
     }}
     .topbar-btn:hover {{ background: rgba(255,255,255,0.10); }}
-    .topbar-btn.danger:hover {{ background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); color: #f87171; }}
+    .topbar-kbd {{
+      font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+      background: rgba(255,255,255,.08);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 12px;
+    }}
 
     /* ── messages ────────────────────────────────────────────────────── */
     .messages {{
@@ -574,7 +580,7 @@ def _html_page() -> str:
 
       <!-- topbar -->
       <div class="topbar">
-        <span class="topbar-title">Chat — type <kbd style="font-family:monospace;background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-size:12px">/</kbd> for commands</span>
+        <span class="topbar-title">Chat — type <kbd class="topbar-kbd">/</kbd> for commands</span>
         <div class="topbar-actions">
           <button class="topbar-btn" id="retrainBtn">⟳ Retrain</button>
           <button class="topbar-btn danger" id="clearBtn">Clear chat</button>
@@ -1013,7 +1019,7 @@ def _html_page() -> str:
         const rest  = val.slice(1).trim();
         const parts = rest.split(/\\s+/, 2);
         const cmd   = parts[0].toLowerCase().replace(/-/g, '_');
-        const arg   = parts.length > 1 ? parts.slice(1).join(' ') : '';
+        const arg   = parts.length > 1 ? parts[1] : '';
 
         if (!cmd)                       {{ await cmdHelp(); return; }}
         if (cmd === 'help')             {{ await cmdHelp(); return; }}

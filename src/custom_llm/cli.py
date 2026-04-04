@@ -280,7 +280,7 @@ def _setup_readline() -> None:
         specs = _command_specs()
         completions = ["/" + name for name in specs]
 
-        def _completer(text: str, state: int) -> "str | None":
+        def _completer(text: str, state: int) -> str | None:
             if text.startswith("/"):
                 prefix = text[1:].lower().replace("-", "_")
                 matches = [c for c in completions if c[1:].startswith(prefix)]
