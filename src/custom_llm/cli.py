@@ -272,29 +272,68 @@ def _command_specs() -> Dict[str, str]:
     }
 
 
+def _setup_readline() -> None:
+    """Enable Tab-completion for /commands when readline is available."""
+    try:
+        import readline as _rl
+
+        specs = _command_specs()
+        completions = ["/" + name for name in specs]
+
+        def _completer(text: str, state: int) -> "str | None":
+            if text.startswith("/"):
+                prefix = text[1:].lower().replace("-", "_")
+                matches = [c for c in completions if c[1:].startswith(prefix)]
+            else:
+                matches = []
+            return matches[state] if state < len(matches) else None
+
+        _rl.set_completer(_completer)
+        _rl.set_completer_delims("")  # treat the whole token as one unit
+        _rl.parse_and_bind("tab: complete")
+    except (ImportError, AttributeError):
+        pass  # readline not available (e.g. Windows without pyreadline)
+
+
 def _show_command_suggestions(prefix: str = "") -> None:
     specs = _command_specs()
     prefix = prefix.strip().lower().replace("-", "_")
 
-    lines = []
-    for name, desc in specs.items():
-        if prefix and not name.startswith(prefix):
-            continue
-        marker = f"/{name}"
-        if prefix:
-            marker = f"/{name[:len(prefix)]}[{name[len(prefix):]}]"
-        lines.append(f"{marker}  {desc}")
+    matches = {name: desc for name, desc in specs.items() if not prefix or name.startswith(prefix)}
 
-    if not lines:
+    if not matches:
         _print_bot_block("No command matches that prefix.", title="system")
         return
 
+    # Visual box styled like a command palette popup
+    width = min(shutil.get_terminal_size((80, 24)).columns - 2, 80)
+    inner = width - 4
+    sep = "+" + "-" * (width - 2) + "+"
+
+    lines: list[str] = [sep, f"| {_paint('Commands', color=_Style.CYAN, bold=True).ljust(inner)} |", sep]
+
+    for name, desc in matches.items():
+        cmd_part = _paint(f"/{name}", color=_Style.GREEN, bold=True)
+        # Left-pad cmd to 18 chars (visible), right-pad desc
+        raw_cmd = f"/{name}"
+        padding = max(1, 18 - len(raw_cmd))
+        row = f"  {cmd_part}{' ' * padding}{desc}"
+        # Plain version for length check
+        plain = f"  {raw_cmd}{' ' * padding}{desc}"
+        if len(plain) > inner:
+            desc = desc[: inner - len(f"  {raw_cmd}{' ' * padding}") - 3] + "..."
+            plain = f"  {raw_cmd}{' ' * padding}{desc}"
+            row = f"  {cmd_part}{' ' * padding}{desc}"
+        lines.append(f"| {row}{' ' * (inner - len(plain))} |")
+
+    lines.append(sep)
     lines.append("")
-    lines.append("Type a full command and press Enter.")
-    _print_bot_block("\n".join(lines), title="system")
+    lines.append(_paint("  ↑↓ arrow keys (Tab on unix) to autocomplete · Enter to run", color=_Style.DIM, dim=True))
+    print("\n" + "\n".join(lines))
 
 
 def run_cli() -> None:
+    _setup_readline()
     bot = SmartAssistant()
 
     print(_welcome_text())
