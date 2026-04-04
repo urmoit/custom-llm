@@ -43,20 +43,26 @@ no pre-trained weights, no model downloads, everything trained from scratch on y
 4. Run `chat_ui.bat` to open the browser web UI
 
 ## Custom LLM architecture
-The model (`src/custom_llm/model.py`) is a small GPT-style decoder-only transformer:
+The model (`src/custom_llm/model.py`) is a ~10M parameter GPT-style decoder-only transformer:
 
 ```
 vocab_size  : determined from corpus (up to 20 000 tokens)
-d_model     : 256
-n_heads     : 4   (head_dim = 64)
-n_layers    : 4
-context_len : 256 tokens
-d_ff        : 512
+d_model     : 512
+n_heads     : 8   (head_dim = 64)
+n_layers    : 6
+context_len : 384 tokens
+d_ff        : 1024
 dropout     : 0.1
-parameters  : ~4–6 M (varies with vocab size)
+epochs      : 8
+batch_size  : 4
+learning_rate: 2e-4
+parameters  : ~10M (varies with vocab size, typically 9.5-10.5M)
 ```
 
 All attention is implemented from raw tensor multiplications — no wrapper libraries.
+
+**Upgraded from original 3.9M parameter model** to provide richer knowledge representation,
+better reasoning capabilities, and more natural conversational ability.
 
 ## Knowledge-first training
 Instead of manually writing Q/A lines, add facts to markdown files in `knowledge/`.
@@ -69,6 +75,47 @@ This will:
 2. Build the custom tokenizer vocabulary from those chunks
 3. Train the custom LLM (next-token prediction) on the chunks
 4. Build the TF-IDF retrieval index alongside the LLM (used for RAG)
+
+## Expanded knowledge domains
+The knowledge base now covers **25+ topic areas** including:
+
+**Core subjects:**
+- Science: Physics, chemistry, biology, mathematics, climate
+- Technology: AI/ML, software engineering, databases, networking, cloud
+- History: Ancient civilizations, world wars, modern era
+- Geography: World geography, countries, regions
+- Health: Medicine, nutrition, fitness, mental health
+- Philosophy: Ethics, logic, epistemology, key thinkers
+
+**New expanded areas:**
+- Mathematics & Statistics: Algebra, calculus, probability, statistics
+- Psychology: Cognitive biases, memory, motivation, social psychology
+- Space & Astronomy: Solar system, stars, galaxies, exploration
+- Personal Finance: Budgeting, investing, retirement, debt management
+- Food & Cooking: Techniques, world cuisines, baking, food safety
+- Literature & Writing: Classic works, poetry, narrative structure
+- Music & Sound: Theory, history, production
+- Art & Visual Culture: Renaissance to modern art, design, film
+- Environment & Ecology: Biodiversity, climate, conservation
+- Law & Justice: Constitutional, criminal, civil law basics
+- Education & Learning: Study techniques, critical thinking
+- Sports & Athletics: Major sports, training, Olympics
+- Travel & Culture: Customs, festivals, sustainable tourism
+- Relationships & Communication: Active listening, conflict resolution
+
+## Conversational improvements
+The assistant now handles **natural dialogue** without requiring web search for:
+- Greetings, small talk, and farewells
+- Clarification requests and follow-ups
+- Agreement/understanding checks ("ok", "got it", "makes sense")
+- Confusion signals ("I don't understand", "can you explain")
+- Casual conversation patterns
+- Yes/no responses to previous questions
+- Expressions of interest ("interesting", "cool", "fascinating")
+- Grammar cleanup requests
+- Capability and knowledge domain questions
+
+This enables fluid multi-turn conversations without triggering unnecessary web searches.
 
 ## Training backends
 

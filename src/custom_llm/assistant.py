@@ -262,6 +262,85 @@ class SmartAssistant:
             # Let this fall through to knowledge search — the knowledge base may have relevant content
             return None
 
+        # Agreement/understanding checks
+        if q in {"ok", "okay", "got it", "i see", "makes sense", "understood", "cool", "nice"}:
+            import random
+            acknowledgments = [
+                "Great! Let me know if you have any other questions.",
+                "Glad that makes sense! What else would you like to explore?",
+                "Perfect! Feel free to ask about anything else.",
+                "Awesome! I'm here if you need more help.",
+            ]
+            return AnswerResult(
+                answer=random.choice(acknowledgments),
+                used_web=False, source="conversation",
+                thinking="User acknowledgment response.", confidence=1.0,
+            )
+
+        # Confusion/clarification requests
+        if any(p in q for p in ["i don't understand", "confusing", "don't get it", "what do you mean",
+                                  "can you explain", "help me understand"]):
+            last_bot = self.conversation.last_bot()
+            if last_bot:
+                return AnswerResult(
+                    answer=(
+                        "Let me try to explain that differently:\n\n"
+                        + last_bot[:250]
+                        + "\n\nDoes that help clarify things? I can break it down further if needed."
+                    ),
+                    used_web=False, source="conversation",
+                    thinking="Context-aware clarification request.", confidence=0.8,
+                )
+
+        # Casual chat patterns
+        if any(p in q for p in ["you know", "i mean", "like", "um", "uh", "well", "so"]):
+            # Check if it's a vague conversational prompt
+            if len(q.split()) < 6 and not any(w in q for w in ["what", "how", "why", "when", "where", "who"]):
+                return AnswerResult(
+                    answer=(
+                        "I'm here to help! Could you rephrase your question or tell me more about "
+                        "what you'd like to know? I can discuss almost any topic."
+                    ),
+                    used_web=False, source="conversation",
+                    thinking="Vague conversational prompt — asking for clarification.", confidence=0.7,
+                )
+
+        # Yes/no follow-ups
+        if q in {"yes", "yeah", "yep", "sure", "absolutely", "definitely"}:
+            last_bot = self.conversation.last_bot()
+            if last_bot and "?" in last_bot:
+                return AnswerResult(
+                    answer=(
+                        "Great! Based on what we discussed, is there anything specific you'd like "
+                        "to explore further? I can go into more detail on any aspect."
+                    ),
+                    used_web=False, source="conversation",
+                    thinking="Affirmative response to previous question.", confidence=0.8,
+                )
+            return AnswerResult(
+                answer="Got it! What would you like to talk about next?",
+                used_web=False, source="conversation",
+                thinking="Simple affirmative response.", confidence=0.9,
+            )
+
+        if q in {"no", "nope", "nah", "not really"}:
+            return AnswerResult(
+                answer="No problem! What else can I help you with? I'm here for any questions or topics you'd like to explore.",
+                used_web=False, source="conversation",
+                thinking="Negative response — offering new direction.", confidence=0.9,
+            )
+
+        # Topic interest checks
+        if any(p in q for p in ["interesting", "fascinating", "cool", "awesome", "amazing"]):
+            return AnswerResult(
+                answer=(
+                    "Right? It's one of those topics that keeps getting more interesting the more you learn. "
+                    "Would you like to dive deeper into any specific aspect, or explore something related?"
+                ),
+                used_web=False, source="conversation",
+                thinking="User expressed interest — encouraging deeper exploration.", confidence=0.9,
+            )
+
         return None
 
     # ------------------------------------------------------------------

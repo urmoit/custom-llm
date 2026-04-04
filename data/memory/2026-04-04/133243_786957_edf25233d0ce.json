@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-04T13:32:43.786957+03:00",
+  "date": "2026-04-04",
+  "topic": "Chat Memory",
+  "section": "Interaction",
+  "question": "what can you do",
+  "answer": "Here's what I can help with: \u2022 Answer questions on science, history, technology, geography, health, philosophy, economics, culture, and more \u2022 Explain concepts at any depth \u2014 from simple overviews to technical detail \u2022 Write and debug Python scripts (file organizers, API clients, log analyzers, etc.) \u2022 Convert length and measurement units \u2022 Classify text, detect intent, and handle NLP tasks \u2022 Search the web for current information when my local knowledge isn't enough \u2022 Hold a natural multi-turn conversation with context awareness Just ask naturally \u2014 I'll do my best to help.",
+  "source": "conversation",
+  "used_web": false,
+  "thinking": "Expanded capabilities description.",
+  "confidence": 1.0,
+  "memory_key": "edf25233d0ceadedc9c39960e64647cc19d15a86"
+}

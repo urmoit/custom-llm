@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-04-04T13:33:27.638495+03:00",
+  "date": "2026-04-04",
+  "topic": "Chat Memory",
+  "section": "Interaction",
+  "question": "generate python script to organize files by extension",
+  "answer": "Here is a Python file organizer script (supports images, docs, audio, video, code, archives): import argparse import shutil from pathlib import Path CATEGORY_MAP = { 'images': {'.png', '.jpg', '.jpeg', '.gif', '.webp'}, 'docs': {'.pdf', '.docx', '.txt', '.md'}, 'archives': {'.zip', '.rar', '.7z', '.tar', '.gz'}, 'audio': {'.mp3', '.wav', '.flac', '.aac', '.ogg'}, 'video': {'.mp4', '.avi', '.mkv', '.mov', '.wmv'}, 'code': {'.py', '.js', '.ts', '.html', '.css', '.java', '.cpp'}, } def pick_category(ext: str) -> str: for name, exts in CATEGORY_MAP.items(): if ext in exts: return name return 'other' def organize(root: Path, dry_run: bool = False) -> dict[str, int]: counts: dict[str, int] = {k: 0 for k in list(CATEGORY_MAP) + ['other']} for item in root.iterdir(): if item.is_dir(): continue category = pick_category(item.suffix.lower()) target_dir = root / category target_dir.mkdir(exist_ok=True) target = target_dir / item.name index = 1 while target.exists(): target = target_dir / f'{item.stem}_{index}{item.suffix}' index += 1 if dry_run: print(f'[dry-run] Would move: {item.name} -> {category}/') else: shutil.move(str(item), str(target)) counts[category] += 1 return counts def main() -> None: parser = argparse.ArgumentParser(description='Organize files by extension') parser.add_argument('path', help='Target folder path') parser.add_argument('--dry-run', action='store_true', help='Preview without moving') args = parser.parse_args() root = Path(args.path).expanduser().resolve() if not root.exists() or not root.is_dir(): raise SystemExit(f'Invalid folder: {root}') counts = organize(root, dry_run=args.dry_run) label = '[dry-run] ' if args.dry_run else '' print(f'{label}Organizing complete:') for key, value in counts.items(): if value: print(f' {key}: {value} file(s)') if __na...",
+  "source": "python-script-generator",
+  "used_web": false,
+  "thinking": "Generated enhanced file organizer.",
+  "confidence": 1.0,
+  "memory_key": "2f0c8bbbf97a2b21b717b52ab0225ba1c29a3542"
+}

@@ -16,16 +16,16 @@ MODEL_META_FILE = ARTIFACTS_DIR / "model_meta.json"
 CUSTOM_LLM_FILE = ARTIFACTS_DIR / "custom_llm.pt"
 TOKENIZER_FILE = ARTIFACTS_DIR / "tokenizer.json"
 
-# Custom LLM hyperparameters — small model trainable on CPU
-CUSTOM_LLM_D_MODEL = 256
-CUSTOM_LLM_N_HEADS = 4
-CUSTOM_LLM_N_LAYERS = 4
-CUSTOM_LLM_CONTEXT_LENGTH = 256
-CUSTOM_LLM_D_FF = 512
+# Custom LLM hyperparameters — ~10M parameter model for richer knowledge & reasoning
+CUSTOM_LLM_D_MODEL = 512
+CUSTOM_LLM_N_HEADS = 8
+CUSTOM_LLM_N_LAYERS = 6
+CUSTOM_LLM_CONTEXT_LENGTH = 384
+CUSTOM_LLM_D_FF = 1024
 CUSTOM_LLM_DROPOUT = 0.1
-CUSTOM_LLM_EPOCHS = 5
-CUSTOM_LLM_BATCH_SIZE = 8
-CUSTOM_LLM_LR = 3e-4
+CUSTOM_LLM_EPOCHS = 8
+CUSTOM_LLM_BATCH_SIZE = 4
+CUSTOM_LLM_LR = 2e-4
 
 # 10M-style model settings — lower threshold for broader recall with richer vocab
 TOP_K_LOCAL = 5                    # more related results shown

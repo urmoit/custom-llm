@@ -1,9 +1,15 @@
 {
-  "backend": "transformer",
-  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "backend": "custom",
+  "model_name": "custom-gpt-scratch",
   "device": "cuda",
-  "note": "GPU transformer embeddings (best quality)",
-  "model_profile": "transformer-embedding",
-  "approx_parameters": 22400000,
-  "corpus_size": 867
+  "note": "Fully custom transformer LLM trained from scratch",
+  "model_profile": "custom-transformer",
+  "num_parameters": 16342016,
+  "d_model": 512,
+  "n_layers": 6,
+  "n_heads": 8,
+  "context_length": 384,
+  "vocab_size": 6914,
+  "corpus_size": 1688,
+  "epochs": 8
 }
