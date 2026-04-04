@@ -56,8 +56,10 @@ def _command_specs() -> Dict[str, str]:
     return {
         "help": "Show commands",
         "version": "Show web, CLI, and model versions",
+        "model_info": "Show custom LLM architecture and stats",
         "gpu_status": "Show CUDA and training backend status",
         "search": "Force web search",
+        "retrain": "Learn from conversations and retrain the model",
         "refresh": "Refresh chat session and reload the page",
         "clear": "Clear screen",
         "exit": "Quit",
@@ -108,8 +110,50 @@ def _format_version_summary() -> str:
     return f"Web UI v{web_version} | CLI UI v{cli_version} | LLM model v{llm_version}"
 
 
+def _model_info_dict() -> Dict[str, Any]:
+    """Return a JSON-serialisable dict of custom LLM metadata from the saved artifact."""
+    from .config import MODEL_META_FILE
+    if not MODEL_META_FILE.exists():
+        return {"backend": "none", "status": "No model trained yet. Run build_info_and_train.bat."}
+    try:
+        meta = json.loads(MODEL_META_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"backend": "unknown", "status": "Could not read model metadata."}
+
+    backend = meta.get("backend", "unknown")
+    result: Dict[str, Any] = {
+        "backend": backend,
+        "model_name": meta.get("model_name", "unknown"),
+        "device": meta.get("device", "cpu"),
+        "corpus_size": meta.get("corpus_size", 0),
+    }
+    if backend == "custom":
+        result["num_parameters"] = meta.get("num_parameters", 0)
+        result["vocab_size"] = meta.get("vocab_size", 0)
+        result["d_model"] = meta.get("d_model", 256)
+        result["n_layers"] = meta.get("n_layers", 4)
+        result["n_heads"] = meta.get("n_heads", 4)
+        result["context_length"] = meta.get("context_length", 256)
+        result["epochs"] = meta.get("epochs", 0)
+        result["status"] = "Custom transformer LLM (trained from scratch)"
+    elif backend == "tfidf":
+        result["vocab_size"] = meta.get("vocab_size", 0)
+        result["status"] = "TF-IDF retrieval (no generation)"
+    else:
+        result["status"] = meta.get("note", "")
+    return result
+
+
 def _html_page() -> str:
     version_text = html.escape(_format_version_summary())
+    info = _model_info_dict()
+    backend_label = html.escape(str(info.get("backend", "unknown")).upper())
+    params_val = info.get("num_parameters", 0)
+    params_text = html.escape(f"{int(params_val):,}" if params_val else "—")
+    vocab_val = info.get("vocab_size", 0)
+    vocab_text = html.escape(f"{int(vocab_val):,}" if vocab_val else "—")
+    corpus_val = info.get("corpus_size", 0)
+    corpus_text = html.escape(f"{int(corpus_val):,}" if corpus_val else "—")
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -245,6 +289,8 @@ def _html_page() -> str:
       font-size: 13px;
     }}
     .command-btn:hover {{ transform: translateY(-1px); border-color: rgba(125, 168, 255, 0.45); background: rgba(125, 168, 255, 0.08); }}
+    .command-btn.retrain-btn {{ border-color: rgba(102, 227, 196, 0.28); }}
+    .command-btn.retrain-btn:hover {{ border-color: rgba(102, 227, 196, 0.65); background: rgba(102, 227, 196, 0.1); }}
     .command-btn .cmd {{ display: block; font-weight: 700; color: var(--accent); margin-bottom: 4px; font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace; }}
     .command-btn .desc {{ color: var(--muted); line-height: 1.35; }}
 
@@ -358,9 +404,9 @@ def _html_page() -> str:
   <div class="shell">
     <div class="hero">
       <section class="card brand">
-        <div class="kicker">Local browser assistant</div>
+        <div class="kicker">Fully custom transformer AI — no pre-trained weights</div>
         <h1>Custom LLM Web UI</h1>
-        <p class="sub">A local chat interface for your retrieval-based assistant. It keeps the same knowledge, versions, and behavior as the CLI, but runs in the browser.</p>
+        <p class="sub">A local chat interface for your custom GPT-style transformer. Every weight was trained from scratch on your knowledge base. Chat history is remembered and used on the next retrain.</p>
       </section>
       <aside class="card stats">
         <div class="stat">
@@ -368,8 +414,20 @@ def _html_page() -> str:
           <div class="value">{version_text}</div>
         </div>
         <div class="stat">
-          <div class="label">Open locally</div>
-          <div class="value">http://{html.escape(HOST_DEFAULT)}:{PORT_DEFAULT}</div>
+          <div class="label">Backend</div>
+          <div class="value">{backend_label}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Parameters</div>
+          <div class="value">{params_text}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Vocab size</div>
+          <div class="value">{vocab_text}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Corpus documents</div>
+          <div class="value">{corpus_text}</div>
         </div>
       </aside>
     </div>
@@ -390,8 +448,10 @@ def _html_page() -> str:
           <div class="command-grid" id="commands">
             <button class="command-btn" data-command="/help"><span class="cmd">/help</span><span class="desc">Show commands</span></button>
             <button class="command-btn" data-command="/version"><span class="cmd">/version</span><span class="desc">Show versions</span></button>
+            <button class="command-btn" data-command="/model_info"><span class="cmd">/model_info</span><span class="desc">Custom LLM stats</span></button>
             <button class="command-btn" data-command="/gpu_status"><span class="cmd">/gpu_status</span><span class="desc">Show GPU status</span></button>
             <button class="command-btn" data-command="/search "><span class="cmd">/search</span><span class="desc">Force web search</span></button>
+            <button class="command-btn retrain-btn" data-command="/retrain"><span class="cmd">/retrain</span><span class="desc">Learn from chats + retrain</span></button>
             <button class="command-btn" data-command="/refresh"><span class="cmd">/refresh</span><span class="desc">Reload page + backend</span></button>
             <button class="command-btn" data-command="/clear"><span class="cmd">/clear</span><span class="desc">Clear chat</span></button>
             <button class="command-btn" data-command="/exit"><span class="cmd">/exit</span><span class="desc">Close the session</span></button>
@@ -432,13 +492,15 @@ def _html_page() -> str:
     const commands = document.getElementById('commands');
 
     const COMMAND_LINES = [
-      '/help      Show commands',
-      '/version   Show web, CLI, and model versions',
-      '/gpu_status Show CUDA and training backend status',
-      '/search    Force web search',
-      '/refresh   Refresh chat session and reload the page',
-      '/clear     Clear screen',
-      '/exit      Quit',
+      '/help        Show commands',
+      '/version     Show web, CLI, and model versions',
+      '/model_info  Show custom LLM architecture and stats',
+      '/gpu_status  Show CUDA and training backend status',
+      '/search      Force web search',
+      '/retrain     Learn from your conversations and retrain the model',
+      '/refresh     Refresh chat session and reload the page',
+      '/clear       Clear screen',
+      '/exit        Quit',
     ];
 
     function scrollToBottom() {{
@@ -644,6 +706,52 @@ def _html_page() -> str:
       }}
     }}
 
+    async function showModelInfo() {{
+      try {{
+        const data = await fetchJson('/api/model_info');
+        const lines = [
+          'Custom LLM Architecture',
+          '==============================',
+          'Backend: ' + (data.backend || 'unknown').toUpperCase(),
+          'Model: ' + (data.model_name || 'unknown'),
+          'Device: ' + (data.device || 'cpu'),
+        ];
+        if (data.num_parameters) lines.push('Parameters: ' + Number(data.num_parameters).toLocaleString());
+        if (data.vocab_size) lines.push('Vocabulary size: ' + Number(data.vocab_size).toLocaleString());
+        if (data.d_model) lines.push('d_model: ' + data.d_model);
+        if (data.n_layers) lines.push('n_layers: ' + data.n_layers);
+        if (data.n_heads) lines.push('n_heads: ' + data.n_heads);
+        if (data.context_length) lines.push('context_length: ' + data.context_length);
+        if (data.corpus_size) lines.push('Corpus documents: ' + Number(data.corpus_size).toLocaleString());
+        if (data.epochs) lines.push('Training epochs: ' + data.epochs);
+        lines.push('');
+        lines.push(data.status || '');
+        lines.push('');
+        lines.push('Use /retrain to rebuild the model including your chat history.');
+        addMessage(lines.join('\\n'), 'bot', 'model info', 'plain');
+        setStatus('Ready.');
+      }} catch (error) {{
+        addMessage('Error: ' + error.message, 'bot', 'request failed', 'plain');
+        setStatus('Request failed.');
+      }}
+    }}
+
+    async function retrainModel() {{
+      setStatus('Retraining... this may take a minute.');
+      addMessage(
+        'Starting retrain — learning from all knowledge files and your conversation history. Please wait...',
+        'bot', 'system', 'plain'
+      );
+      try {{
+        const data = await fetchJson('/api/retrain', {{ method: 'POST' }});
+        addMessage(data.message || 'Retrain complete.', 'bot', 'retrain result', 'plain');
+        setStatus('Retrain complete. Reload the page to see updated stats.');
+      }} catch (error) {{
+        addMessage('Retrain failed: ' + error.message, 'bot', 'error', 'plain');
+        setStatus('Retrain failed.');
+      }}
+    }}
+
     async function refreshUi() {{
       setStatus('Refreshing...');
       try {{
@@ -676,6 +784,14 @@ def _html_page() -> str:
       }}
       if (cmd === 'gpu' || cmd === 'gpu_status') {{
         await showGpuStatus();
+        return true;
+      }}
+      if (cmd === 'model_info') {{
+        await showModelInfo();
+        return true;
+      }}
+      if (cmd === 'retrain') {{
+        await retrainModel();
         return true;
       }}
       if (cmd === 'search') {{
@@ -796,6 +912,10 @@ class _WebUIHandler(BaseHTTPRequestHandler):
             _json_response(self, {"status": _gpu_status_text()})
             return
 
+        if parsed.path == "/api/model_info":
+            _json_response(self, _model_info_dict())
+            return
+
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -832,6 +952,18 @@ class _WebUIHandler(BaseHTTPRequestHandler):
                     "llm_version": llm_version,
                 },
             )
+            return
+
+        if parsed.path == "/api/retrain":
+            try:
+                msg = type(self).assistant.retrain_and_reload()
+                _json_response(self, {"message": msg, "status": "ok"})
+            except Exception as exc:
+                _json_response(
+                    self,
+                    {"error": str(exc), "status": "error"},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")

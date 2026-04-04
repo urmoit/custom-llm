@@ -77,18 +77,20 @@ def _welcome_text() -> str:
     header = _box(
         f"Custom LLM CLI  v{cli_version}",
         [
-            "Ask anything. For conversions, try: how many cm are in 2 km",
+            "Powered by a fully custom GPT-style transformer trained from scratch.",
             f"CLI UI version: v{cli_version} | LLM model version: v{llm_version}",
             "",
             "Commands:",
-            "/help      Show commands",
-            "/version   Show CLI and model versions",
-            "/gpu_status Show CUDA and training backend status",
-            "           aliases: /gpu-status, /gpu",
-            "/search    Force web search (example: /search latest Python)",
-            "/refresh   Refresh chat session",
-            "/clear     Clear screen",
-            "/exit      Quit",
+            "/help        Show commands",
+            "/version     Show CLI and model versions",
+            "/model_info  Show custom LLM architecture and stats",
+            "/gpu_status  Show CUDA and training backend status",
+            "             aliases: /gpu-status, /gpu",
+            "/search      Force web search (example: /search latest Python)",
+            "/retrain     Learn from your conversations and retrain the model",
+            "/refresh     Refresh chat session",
+            "/clear       Clear screen",
+            "/exit        Quit",
             "Tip: type / to list commands, or /re to filter",
         ],
         color=_Style.CYAN,
@@ -211,12 +213,59 @@ def _gpu_status_text() -> str:
     return "\n".join(lines)
 
 
+def _model_info_text(bot: "SmartAssistant") -> str:  # type: ignore[name-defined]  # noqa: F821
+    lines = ["Custom LLM Architecture", "=" * 30]
+    meta = bot.model_meta
+
+    backend = meta.get("backend", "unknown")
+    lines.append(f"Backend: {backend}")
+
+    if backend == "custom":
+        lines.append(f"Model name: {meta.get('model_name', 'custom-gpt-scratch')}")
+        lines.append(f"Device: {meta.get('device', 'cpu')}")
+        params = meta.get("num_parameters", 0)
+        if params:
+            lines.append(f"Parameters: {int(params):,}")
+        vocab = meta.get("vocab_size", 0)
+        if vocab:
+            lines.append(f"Vocabulary size: {int(vocab):,}")
+        lines.append(f"d_model: {meta.get('d_model', 256)}")
+        lines.append(f"n_layers: {meta.get('n_layers', 4)}")
+        lines.append(f"n_heads: {meta.get('n_heads', 4)}")
+        lines.append(f"context_length: {meta.get('context_length', 256)}")
+        lines.append(f"Corpus size: {meta.get('corpus_size', '?')} documents")
+        lines.append(f"Training epochs: {meta.get('epochs', '?')}")
+        if bot.custom_llm is None:
+            lines.append("")
+            lines.append("WARNING: Custom LLM not loaded (run /retrain to train it)")
+        else:
+            lines.append("")
+            lines.append("Status: model loaded and ready.")
+    elif backend == "tfidf":
+        lines.append(f"Model name: {meta.get('model_name', 'tfidf')}")
+        vocab = meta.get("vocab_size", 0)
+        if vocab:
+            lines.append(f"Vocabulary size: {int(vocab):,}")
+        lines.append(f"Corpus size: {meta.get('corpus_size', '?')} documents")
+        lines.append("")
+        lines.append("Tip: run /retrain with torch installed to upgrade to custom LLM.")
+    else:
+        lines.append(f"Model name: {meta.get('model_name', 'unknown')}")
+        lines.append("No detailed info available.")
+
+    lines.append("")
+    lines.append("Use /retrain to rebuild the model and include your chat history.")
+    return "\n".join(lines)
+
+
 def _command_specs() -> Dict[str, str]:
     return {
         "help": "Show commands",
         "version": "Show CLI and model versions",
+        "model_info": "Show custom LLM architecture and stats",
         "gpu_status": "Show CUDA and training backend status",
         "search": "Force web search",
+        "retrain": "Learn from your conversations and retrain the model",
         "refresh": "Refresh chat session",
         "clear": "Clear screen",
         "exit": "Quit",
@@ -323,6 +372,23 @@ def run_cli() -> None:
                     _print_bot_block(body, title=header)
                 except Exception as exc:
                     _print_bot_block(f"I hit an error: {exc}", title="error")
+                continue
+
+            if cmd_name == "model_info":
+                _print_bot_block(_model_info_text(bot), title="system")
+                continue
+
+            if cmd_name == "retrain":
+                _print_bot_block(
+                    "Retraining model on all knowledge + your conversation history.\n"
+                    "This may take a minute...",
+                    title="system",
+                )
+                try:
+                    msg = _run_with_spinner(bot.retrain_and_reload, label="Training")
+                    _print_bot_block(msg, title="system")
+                except Exception as exc:
+                    _print_bot_block(f"Retrain failed: {exc}", title="error")
                 continue
 
             _show_command_suggestions(cmd_name)
